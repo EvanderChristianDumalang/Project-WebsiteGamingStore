@@ -14,7 +14,7 @@
       <h1 style="font-family: 'Poppins';" class="text-center">Products</h1>
       <div class="container">
   
-        <div class="row">
+        <div class="row ml-n5">
           <a href="/dashboard/product/create" class="btn btn-primary mb-2">+ Tambah produk</a>
           <table class="table table-hover">
             <thead>
@@ -41,7 +41,6 @@
                   <td class="table-data text-center"><%= product.sku %></td>
                   <td class="table-data text-center">Rp.<%= product.price %></td>
                   <td class="table-data  text-center"><%= product.weight %> (gram)</td>
-                  <td class="table-data text-center"><%= product.desc %></td>
                   <td class="table-data text-center"><%= product.brand %></td>
                   <td class="table-data text-center"><%= product.category %></td>
                   <td class="table-data text-center"><%= product.createdAt.toLocaleDateString() %></td>

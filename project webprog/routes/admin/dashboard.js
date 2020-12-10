@@ -1,21 +1,20 @@
 const express = require('express')
 const router = express.Router()
 var auth = require('../../middleware/Auth')
-var bodyParser = require('body-parser')
 var fs = require('fs')
 var path = require('path')
 var authAdmin = require('../../middleware/isAdmin')
 const Products = require('../../models/product')
 const Brands = require('../../models/brand')
-const crypto = require('crypto')
 var multer = require('multer')
 const mongoose = require('mongoose')
 var asyncc = require('async')
-const user = require('../../models/user')
 const Categories = require('../../models/category')
 const Galleries = require('../../models/gallery')
-const Orders = require('../../models/order')
 const Carousels = require('../../models/carousel')
+const Users = require('../../models/user')
+const Confirmations = require('../../models/confirmation')
+const Orders = require('../../models/order')
 var storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads')
@@ -38,10 +37,10 @@ router.get(
     var u
     var ua
     var cat
-    var tp
-    var ts
-    var tf
-    var transactions
+    var tp = []
+    var ts = []
+    var tf = []
+    var transactions = []
     var tasks = [
         function (callback) {
             db.collection('orders').aggregate([
@@ -262,8 +261,17 @@ router.get(
 )
 
 router.delete('/dashboard/product/:id/delete', async (req, res) => {
+  try {
+    const product = await Products.findById(req.params.id)
+  await Galleries.deleteMany({slug:product.slug})
+  await Carousels.findOneAndDelete({slug:product.slug})
+  } catch (error) {
+    console.log(error)
+  }
+
   await Products.findByIdAndDelete(req.params.id)
-  res.redirect('/dashboard/product')
+
+  res.redirect('/dashboard/product')  
 })
 
 //BRAND CRUD
@@ -537,6 +545,39 @@ router.put('/dashboard/transaction/:id/update-success', async (req, res) => {
   }
 })
 
+router.get('/dashboard/transaction/:id/detail', async (req, res) => {
+  var displayOrder = []
+
+  const order = await Orders.findOne({orderID: req.params.id})
+  const user = await Users.findOne({_id: mongoose.Types.ObjectId(order.customerID)})
+
+   await db.collection('orders').aggregate([
+        { "$match" : {"orderID": req.params.id } },
+        { "$addFields": { "prodID": { "$toObjectId": "$productID" }}},
+        { "$lookup": {
+          "from": "products",
+          "localField": "prodID",
+          "foreignField": "_id",
+          "as": "fromCart"
+        }},
+        {
+            "$replaceRoot": { "newRoot": { "$mergeObjects": [ { "$arrayElemAt": [ "$fromCart", 0 ] }, "$$ROOT" ] } }
+         },
+         { "$project": { "fromCart": 0 } },{ "$group": { "_id": "$orderID",
+         
+         "total": { "$first": '$total' }, "status": { "$first": '$Status' },"createdAt": { "$first": '$createdAt' },
+         "fromCart": { "$addToSet": "$$ROOT" }}}
+      ]).toArray(function(err, result) {
+        if (err) throw err;
+
+        displayOrder = result
+        console.log(displayOrder)
+        
+        res.render('pages/admin/transaction/detail', {name: req.user.name,
+          orders:displayOrder, user:user});
+        })
+})
+
 //update failed
 router.put('/dashboard/transaction/:id/update-failed', async (req, res) => {
   const orderCollection = db.collection('orders')
@@ -627,6 +668,53 @@ router.delete('/dashboard/web/carousel/:id/delete', async (req, res) => {
   res.redirect('/dashboard/web/carousel')
 })
 
+router.get(
+  '/dashboard/confirmation-payment',
+  auth.ensureAuthenticate,
+  authAdmin.isAdmin('ADMIN'), async function (req, res) {
+    var displayHistory = []
+    db.collection('confirmations').aggregate([
+      { "$addFields": { "orderID": "$orderID" }},
+      { "$lookup": {
+        "from": "orders",
+        "localField": "orderID",
+        "foreignField": "orderID",
+        "as": "fromCart"
+      }},
+        {
+          "$replaceRoot": { "newRoot": { "$mergeObjects": [ { "$arrayElemAt": [ "$fromCart", 0 ] }, "$$ROOT" ] } }
+       },
+         { "$project": { "fromCart": 0 } },{ "$group": { "_id": "$orderID",
+         
+         "orderID": { "$first": '$orderID' }, "invoice": { "$first": '$invoice' },
+         "fromCart": { "$addToSet": "$$ROOT" }}},
+         
+         { "$sort": { "createdAt": -1}},
+      ]).toArray(function(err, result) {
+        if (err) throw err;
+
+      
+    
+        displayHistory = result
+
+        console.log(displayHistory[0].fromCart)
+
+        res.render('pages/admin/confirmation/index', {name: req.user.name,
+            isLoggedIn: true, confirmations:displayHistory,});
+        })
+  }
+)
+
+router.put(
+  '/dashboard/confirmation-payment/:id',
+  async (req, res) => {
+    req.carousel = await Carousels.findById(req.params.id)
+    next()
+  },
+  saveCarouselAndRedirect('edit')
+)
+
+
 
 function saveProductAndRedirect (pathx) {
   return async (req, res) => {
@@ -646,6 +734,7 @@ function saveProductAndRedirect (pathx) {
       product = await product.save()
       res.redirect(`/dashboard/product/${product.slug}`)
     } catch (e) {
+      req.flash('error','terdeteksi duplikasi pada SKU, (SKU harus unik!)');
       res.render(`pages/admin/products/${pathx}`, {
         name: req.user.name,
         isLoggedIn: true,
@@ -740,5 +829,7 @@ function saveGalleryAndRedirect (pathz) {
     }
   }
 }
+
+
 
 module.exports = router
